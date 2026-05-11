@@ -173,6 +173,7 @@
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
+    "send_tooltip": "Send",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
     "resolve": {

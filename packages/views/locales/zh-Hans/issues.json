@@ -171,6 +171,7 @@
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
+    "send_tooltip": "发送",
     "expand_tooltip": "展开",
     "collapse_tooltip": "收起",
     "resolve": {
