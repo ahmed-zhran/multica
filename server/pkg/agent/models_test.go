@@ -8,7 +8,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor", "copilot"} {
+	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -24,6 +24,33 @@ func TestListModelsStaticProviders(t *testing.T) {
 				t.Errorf("ListModels(%q)[%d] has empty Label", provider, i)
 			}
 		}
+	}
+}
+
+func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
+	// Copilot uses dynamic ACP discovery, but with no `copilot`
+	// binary on PATH (the discovery LookPath fails) it must fall
+	// back to copilotStaticModels() so the UI dropdown stays
+	// populated. This is the "binary missing on the daemon host"
+	// path we care about for self-hosted runtimes.
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "copilot")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "copilot", "/nonexistent/copilot-cli")
+	if err != nil {
+		t.Fatalf("ListModels(copilot) error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected static fallback models, got empty list")
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids["gpt-5.4"] || !ids["claude-sonnet-4.6"] {
+		t.Errorf("static fallback missing expected models: %+v", got)
 	}
 }
 
@@ -93,6 +120,28 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+}
+
+func TestInferCopilotProvider(t *testing.T) {
+	cases := map[string]string{
+		"gpt-5.5":           "openai",
+		"gpt-5.4-mini":      "openai",
+		"gpt-5.3-codex":     "openai",
+		"gpt-4.1":           "openai",
+		"o3-mini":           "openai",
+		"claude-opus-4.7":   "anthropic",
+		"claude-sonnet-4.6": "anthropic",
+		"claude-haiku-4.5":  "anthropic",
+		"gemini-3-pro":      "google",
+		"grok-code-fast-1":  "xai",
+		"auto":              "",
+		"raptor-mini":       "",
+	}
+	for id, want := range cases {
+		if got := inferCopilotProvider(id); got != want {
+			t.Errorf("inferCopilotProvider(%q) = %q, want %q", id, got, want)
+		}
 	}
 }
 
