@@ -30,34 +30,38 @@ vi.mock("./bubble-menu", () => ({
   EditorBubbleMenu: () => null,
 }));
 
+const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
+const onCreateFired = vi.hoisted(() => ({ value: false }));
+
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => ({
-    get isFocused() {
-      return editorState.isFocused;
-    },
-    get isDestroyed() {
-      return editorState.isDestroyed;
-    },
-    commands: {
-      focus: mockFocus,
-      clearContent: vi.fn(),
-      setContent: mockSetContent,
-      setTextSelection: mockSetTextSelection,
-    },
-    getMarkdown: () => editorState.markdown,
-    state: {
-      doc: {
-        content: {
-          size: 0,
+  useEditor: (options: { onCreate?: (args: { editor: unknown }) => void }) => {
+    if (!editorRef.current) {
+      editorRef.current = {
+        get isFocused() {
+          return editorState.isFocused;
         },
-      },
-      selection: {
-        empty: true,
-        from: 0,
-        to: 0,
-      },
-    },
-  }),
+        get isDestroyed() {
+          return editorState.isDestroyed;
+        },
+        commands: {
+          focus: mockFocus,
+          clearContent: vi.fn(),
+          setContent: mockSetContent,
+          setTextSelection: mockSetTextSelection,
+        },
+        getMarkdown: () => editorState.markdown,
+        state: {
+          doc: { content: { size: 0 } },
+          selection: { empty: true, from: 0, to: 0 },
+        },
+      };
+    }
+    if (!onCreateFired.value) {
+      onCreateFired.value = true;
+      options?.onCreate?.({ editor: editorRef.current });
+    }
+    return editorRef.current;
+  },
   EditorContent: ({ className }: { className?: string }) => (
     <div className={className} data-testid="editor-content">
       <div className="ProseMirror rich-text-editor" data-testid="prosemirror" />
@@ -73,6 +77,8 @@ describe("ContentEditor", () => {
     editorState.isFocused = false;
     editorState.isDestroyed = false;
     editorState.markdown = "";
+    editorRef.current = null;
+    onCreateFired.value = false;
   });
 
   it("focuses the editor when clicking the empty container area", () => {
@@ -126,6 +132,33 @@ describe("ContentEditor", () => {
     const { rerender } = render(<ContentEditor defaultValue="same content" />);
 
     rerender(<ContentEditor defaultValue="same content" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not sync when editor is unfocused but has unsaved local edits", () => {
+    // Initial render: editor seeded with "old content". onCreate fires and
+    // sets lastEmittedRef = "old content". User then types — editor markdown
+    // diverges from lastEmittedRef but the debounce hasn't fired yet, so
+    // onUpdate hasn't been called and `lastEmittedRef` still holds the old
+    // value. User blurs (so isFocused=false). External update arrives.
+    // We must NOT clobber the unsaved local edits.
+    editorState.markdown = "old content";
+    const { rerender } = render(
+      <ContentEditor defaultValue="old content" onUpdate={() => {}} />,
+    );
+
+    // User typed locally, then blurred. Debounce hasn't flushed yet so
+    // lastEmittedRef inside the component still reflects "old content".
+    editorState.isFocused = false;
+    editorState.markdown = "user typed but unsaved";
+
+    rerender(
+      <ContentEditor
+        defaultValue="external update from another agent"
+        onUpdate={() => {}}
+      />,
+    );
 
     expect(mockSetContent).not.toHaveBeenCalled();
   });

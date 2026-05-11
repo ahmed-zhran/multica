@@ -223,17 +223,31 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // Guards (in order):
     //   1. Skip when the editor is focused — the user is typing locally and
     //      clobbering their input would lose the caret + in-flight characters.
-    //   2. Skip when the incoming markdown matches what the editor already
+    //   2. Skip when the editor has unsaved local edits (dirty). `isFocused`
+    //      is not enough: after blur, there's a window before the `onUpdate`
+    //      debounce fires where the editor's markdown diverges from what's
+    //      been emitted to the parent. `lastEmittedRef.current` is updated
+    //      only inside `onCreate` and after the debounce flushes, so a
+    //      mismatch with the current editor markdown means there's unsaved
+    //      local content we must not clobber.
+    //   3. Skip when the incoming markdown matches what the editor already
     //      holds — avoids a no-op transaction when the cache reflects a write
     //      this same editor just emitted via `onUpdate`.
-    //   3. Pass `emitUpdate: false` so the synced write does not re-trigger
+    //   4. Pass `emitUpdate: false` so the synced write does not re-trigger
     //      `onUpdate` → `onUpdateRef` → server save (self-write loop).
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
       if (editor.isFocused) return;
 
-      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
       const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      if (
+        lastEmittedRef.current !== null &&
+        current !== lastEmittedRef.current
+      ) {
+        return;
+      }
+
+      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
       const incomingNormalized = stripBlobUrls(incoming).trimEnd();
       if (incomingNormalized === current) return;
 
