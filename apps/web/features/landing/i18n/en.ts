@@ -290,7 +290,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         title: "GitHub Linking, Chat Attachments & Safer Issue Navigation",
         changes: [],
         features: [
-          "Connect GitHub so linked pull requests appear directly on Multica issues",
+          "Connect GitHub so linked pull requests appear on Multica issues, sync their status, and close the Multica issue automatically when the PR closes",
           "Chat messages can include file attachments and image previews",
           "Agents and runtimes can now be kept public or private for clearer team access",
           "Stopping a single agent task now asks for confirmation before it is terminated",
@@ -304,7 +304,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Linux desktop packages show the Multica app icon again",
         ],
         fixes: [
-          "Linked issues now close only after every related pull request is resolved",
           "Downloaded attachments keep their original filenames",
           "Local attachments are served more reliably, and upload controls stay disabled until files are ready",
           "Issue creation dialogs keep their text fields at the correct height",
