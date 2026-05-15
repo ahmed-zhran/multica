@@ -22,5 +22,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.6,
     },
+    {
+      url: `${baseUrl}/usecases/squads`,
+      lastModified: new Date("2026-05-15"),
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
   ];
 }
