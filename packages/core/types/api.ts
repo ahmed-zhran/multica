@@ -35,6 +35,17 @@ export interface UpdateIssueRequest {
   attachment_ids?: string[];
 }
 
+export type IssueSortBy =
+  | "position"
+  | "priority"
+  | "start_date"
+  | "due_date"
+  | "created_at"
+  | "updated_at"
+  | "title";
+
+export type IssueSortDirection = "asc" | "desc";
+
 export interface ListIssuesParams {
   limit?: number;
   offset?: number;
@@ -46,6 +57,8 @@ export interface ListIssuesParams {
   creator_id?: string;
   project_id?: string;
   open_only?: boolean;
+  sort_by?: IssueSortBy;
+  sort_direction?: IssueSortDirection;
 }
 
 export interface IssueActorRef {
@@ -73,6 +86,8 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  sort_by?: IssueSortBy;
+  sort_direction?: IssueSortDirection;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */

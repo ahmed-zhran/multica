@@ -106,6 +106,11 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// BackgroundCtx, when non-nil, is used to drive handler-owned background
+	// workers (currently: position rebalance). main.go passes its shutdown
+	// context so workers exit on graceful shutdown. Tests can leave nil and
+	// the workers simply never start.
+	BackgroundCtx context.Context
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -154,6 +159,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
+	}
+	if opts.BackgroundCtx != nil {
+		h.StartBackgroundWorkers(opts.BackgroundCtx)
 	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler

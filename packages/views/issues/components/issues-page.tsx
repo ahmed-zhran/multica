@@ -40,6 +40,9 @@ export function IssuesPage() {
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const sortBy = useIssueViewStore((s) => s.sortBy);
+  const sortDirection = useIssueViewStore((s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
@@ -58,9 +61,9 @@ export function IssuesPage() {
     return filter;
   }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
 
-  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter);
+  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId),
+    ...issueListOptions(wsId, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({

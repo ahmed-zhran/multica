@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
+import { toast } from "sonner";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -28,9 +29,8 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
-import type { IssueGrouping, SortField, SortDirection } from "@multica/core/issues/stores/view-store";
+import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { sortIssues } from "../utils/sort";
 import { StatusIcon } from "./status-icon";
 import { BoardColumn, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
@@ -145,22 +145,21 @@ function buildGroups(
   });
 }
 
-/** Build column ID arrays from TQ issue data, respecting current sort. */
+/**
+ * Build column ID arrays from TQ issue data. Server is the source of truth for
+ * ordering now (see MUL-2314), so we just bucket by group and preserve the
+ * server-returned order — no client-side re-sort.
+ */
 function buildColumns(
   issues: Issue[],
   groups: BoardColumnGroup[],
   grouping: IssueGrouping,
-  sortBy: SortField,
-  sortDirection: SortDirection,
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) {
-    const sorted = sortIssues(
-      issues.filter((i) => getIssueGroupId(i, grouping) === group.id),
-      sortBy,
-      sortDirection,
-    );
-    cols[group.id] = sorted.map((i) => i.id);
+    cols[group.id] = issues
+      .filter((i) => getIssueGroupId(i, grouping) === group.id)
+      .map((i) => i.id);
   }
   return cols;
 }
@@ -239,8 +238,9 @@ export function BoardView({
   projectId?: string;
 }) {
   const { t } = useT("issues");
+  // sortBy is read so the Manual-only drag guard in handleDragEnd can short-
+  // circuit; the actual ordering is driven entirely by the server now.
   const sortBy = useViewStore((s) => s.sortBy);
-  const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
   const { getActorName } = useActorName();
   const myIssuesOpts = myIssuesScope
@@ -316,16 +316,16 @@ export function BoardView({
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection),
+    buildColumns(groupedIssues, groups, grouping),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection));
+      setColumns(buildColumns(groupedIssues, groups, grouping));
     }
-  }, [groupedIssues, groups, grouping, sortBy, sortDirection]);
+  }, [groupedIssues, groups, grouping]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -399,7 +399,17 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection));
+        setColumns(buildColumns(groupedIssues, groups, grouping));
+
+      // Drag-to-reorder only makes sense in Manual sort. Under any other sort
+      // key the server returns rows in a different order than `position`, so
+      // a drop would compute a position that's correct for Manual but visually
+      // out of order under the current view. Reset and toast the user.
+      if (sortBy !== "position") {
+        resetColumns();
+        toast(t(($) => $.toast.drag_requires_manual));
+        return;
+      }
 
       if (!over) {
         resetColumns();
@@ -456,7 +466,7 @@ export function BoardView({
 
       onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition));
     },
-    [groupedIssues, groups, grouping, sortBy, sortDirection, onMoveIssue, groupIds, groupMap],
+    [groupedIssues, groups, grouping, sortBy, onMoveIssue, groupIds, groupMap, t],
   );
 
   return (
@@ -588,9 +598,12 @@ function PaginatedBoardColumn({
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
 }) {
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
-    myIssuesOpts,
+    { sort, myIssues: myIssuesOpts },
   );
   return (
     <BoardColumn
@@ -646,7 +659,10 @@ function HiddenColumnRow({
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
+  const { total } = useLoadMoreByStatus(status, { sort, myIssues: myIssuesOpts });
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">

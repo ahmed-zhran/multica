@@ -114,6 +114,30 @@ SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: GetMinIssuePosition :one
+-- Returns the smallest `position` value in a (workspace_id, status) bucket,
+-- defaulting to 1.0 for an empty bucket so the first new issue lands at 0.0
+-- (`min - 1.0`). New issues are written with `min - 1.0` to keep "newest at
+-- top" semantics under the legacy `position ASC, created_at DESC` ordering.
+SELECT COALESCE(MIN(position), 1.0)::float8 AS min_position
+FROM issue
+WHERE workspace_id = $1 AND status = $2;
+
+-- name: ListIssuePositionsByBucket :many
+-- Used by the rebalance worker. Returns every issue in a (workspace_id,
+-- status) bucket ordered by current `position ASC, created_at DESC, id DESC`
+-- so the worker can deterministically re-space them with sparse float values.
+SELECT id, position, created_at
+FROM issue
+WHERE workspace_id = $1 AND status = $2
+ORDER BY position ASC, created_at DESC, id DESC;
+
+-- name: UpdateIssuePositionOnly :exec
+-- Worker-only: rewrite a single issue's `position` without bumping
+-- `updated_at`. Going through the full UpdateIssue mutation would broadcast
+-- `issue:updated` for every row, defeating the rebalance event's purpose.
+UPDATE issue SET position = $2 WHERE id = $1;
+
 -- name: GetIssueByOrigin :one
 -- Finds the issue stamped with a specific (origin_type, origin_id) pair.
 -- Used by quick-create completion to deterministically locate the issue

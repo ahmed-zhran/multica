@@ -283,11 +283,16 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// Background workers owned by the Handler (position rebalance) need a
+	// shutdown context; reuse the sweep context so they exit on graceful stop.
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
+		BackgroundCtx:      sweepCtx,
 	})
 
 	srv := &http.Server{
@@ -296,7 +301,7 @@ func main() {
 	}
 
 	// Start background workers.
-	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	// (sweepCtx already created above so it can drive Handler-owned workers.)
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient

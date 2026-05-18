@@ -58,6 +58,9 @@ export function ActorIssuesPanel({
   const projectFilters = useStore(actorIssuesViewStore, (s) => s.projectFilters);
   const includeNoProject = useStore(actorIssuesViewStore, (s) => s.includeNoProject);
   const labelFilters = useStore(actorIssuesViewStore, (s) => s.labelFilters);
+  const sortBy = useStore(actorIssuesViewStore, (s) => s.sortBy);
+  const sortDirection = useStore(actorIssuesViewStore, (s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
 
   useClearFiltersOnWorkspaceChange(actorIssuesViewStore, wsId);
 
@@ -108,9 +111,10 @@ export function ActorIssuesPanel({
     wsId,
     queryScope,
     assigneeGroupFilter,
+    sort,
   );
   const rawIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, queryScope, queryFilter),
+    ...myIssueListOptions(wsId, queryScope, queryFilter, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({

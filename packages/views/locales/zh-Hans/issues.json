@@ -63,6 +63,7 @@
     "sort_start_date": "开始日期",
     "sort_due_date": "截止日期",
     "sort_created": "创建时间",
+    "sort_updated": "更新时间",
     "sort_title": "标题",
     "card_priority": "优先级",
     "card_description": "描述",
@@ -113,6 +114,9 @@
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
     "empty_grouping": "没有匹配的 issue"
+  },
+  "toast": {
+    "drag_requires_manual": "切换到 Manual 排序后才能拖拽调整顺序。"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",

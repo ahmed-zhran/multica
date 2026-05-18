@@ -47,11 +47,15 @@ export function collectDeletedIssueCacheMetadata(
   const detail = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
   collectParentId(parentIssueIds, detail?.parent_issue_id);
 
-  collectParentFromListCache(
-    parentIssueIds,
-    qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId)),
-    issueId,
-  );
+  // Walk every mounted list / my-list variant — the parent_issue_id lookup
+  // only needs one cache to hit (all variants carry the same issue bodies),
+  // but querying via prefix means we don't have to know which sort the user
+  // currently has open.
+  for (const [, data] of qc.getQueriesData<ListIssuesCache>({
+    queryKey: issueKeys.list(wsId),
+  })) {
+    collectParentFromListCache(parentIssueIds, data, issueId);
+  }
 
   for (const [, data] of qc.getQueriesData<ListIssuesCache>({
     queryKey: issueKeys.myAll(wsId),
@@ -76,17 +80,13 @@ export function pruneDeletedIssueFromListCaches(
   wsId: string,
   issueId: string,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? removeIssueFromBuckets(old, issueId) : old,
-  );
-
-  for (const [key] of qc.getQueriesData<ListIssuesCache>({
-    queryKey: issueKeys.myAll(wsId),
-  })) {
-    qc.setQueryData<ListIssuesCache>(key, (old) =>
-      old ? removeIssueFromBuckets(old, issueId) : old,
-    );
-  }
+  const remove = (old: ListIssuesCache | undefined) =>
+    old ? removeIssueFromBuckets(old, issueId) : old;
+  // Both list and my-list now key by sort tuple, so prune every mounted
+  // variant via the prefix — a single exact-key write would miss any cache
+  // not under the user's current sort.
+  qc.setQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }, remove);
+  qc.setQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }, remove);
 }
 
 export function pruneDeletedIssueFromParentChildrenCaches(

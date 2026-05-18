@@ -440,6 +440,62 @@ func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
 	}
 }
 
+// TestListIssuesSortByUnknownDowngrades guards the API compatibility contract
+// in MUL-2314: passing an unknown sort_by value must return 200 with the
+// default ordering (created_at DESC) rather than 400. Older desktop builds
+// that hard-code a now-renamed sort key keep working.
+func TestListIssuesSortByUnknownDowngrades(t *testing.T) {
+	// Seed a single issue so the response has something to assert against.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "sort_by fallback test",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var seeded IssueResponse
+	json.NewDecoder(w.Body).Decode(&seeded)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, seeded.ID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&sort_by=this_field_does_not_exist&sort_direction=banana", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200 with unknown sort, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestNewIssuePositionLessThanExisting locks in MUL-2314 fractional-index
+// behavior: new issues must allocate `MIN(position) - 1` within their bucket,
+// so under the legacy `position ASC` ordering a freshly created issue still
+// lands at the top — both for old desktop clients that re-sort by position
+// and as the server-side anchor for fractional drag-drop.
+func TestNewIssuePositionLessThanExisting(t *testing.T) {
+	createOne := func(title string) IssueResponse {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title": title,
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue %s: expected 201, got %d: %s", title, w.Code, w.Body.String())
+		}
+		var resp IssueResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, resp.ID) })
+		return resp
+	}
+
+	first := createOne("position-test-1")
+	second := createOne("position-test-2")
+	if !(second.Position < first.Position) {
+		t.Fatalf("expected second.Position < first.Position, got first=%v second=%v", first.Position, second.Position)
+	}
+}
+
 // TestCreateIssueDefaultStatusIsTodo verifies that issues created without an
 // explicit status default to "todo" so the daemon picks them up immediately.
 // Before this fix the default was "backlog", which daemons ignore.

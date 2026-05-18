@@ -12,6 +12,7 @@ export type WSEventType =
   | "issue:created"
   | "issue:updated"
   | "issue:deleted"
+  | "issue:rebalanced"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
@@ -95,6 +96,12 @@ export interface IssueUpdatedPayload {
 
 export interface IssueDeletedPayload {
   issue_id: string;
+}
+
+export interface IssueRebalancedPayload {
+  workspace_id: string;
+  status: string;
+  items: { id: string; position: number }[];
 }
 
 export interface IssueLabelsChangedPayload {

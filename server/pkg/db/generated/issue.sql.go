@@ -874,6 +874,76 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 	return i, err
 }
 
+const getMinIssuePosition = `-- name: GetMinIssuePosition :one
+SELECT COALESCE(MIN(position), 1.0)::float8 AS min_position
+FROM issue
+WHERE workspace_id = $1 AND status = $2
+`
+
+type GetMinIssuePositionParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      string      `json:"status"`
+}
+
+func (q *Queries) GetMinIssuePosition(ctx context.Context, arg GetMinIssuePositionParams) (float64, error) {
+	row := q.db.QueryRow(ctx, getMinIssuePosition, arg.WorkspaceID, arg.Status)
+	var min_position float64
+	err := row.Scan(&min_position)
+	return min_position, err
+}
+
+const listIssuePositionsByBucket = `-- name: ListIssuePositionsByBucket :many
+SELECT id, position, created_at
+FROM issue
+WHERE workspace_id = $1 AND status = $2
+ORDER BY position ASC, created_at DESC, id DESC
+`
+
+type ListIssuePositionsByBucketParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      string      `json:"status"`
+}
+
+type ListIssuePositionsByBucketRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Position  float64            `json:"position"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListIssuePositionsByBucket(ctx context.Context, arg ListIssuePositionsByBucketParams) ([]ListIssuePositionsByBucketRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePositionsByBucket, arg.WorkspaceID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssuePositionsByBucketRow{}
+	for rows.Next() {
+		var i ListIssuePositionsByBucketRow
+		if err := rows.Scan(&i.ID, &i.Position, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateIssuePositionOnly = `-- name: UpdateIssuePositionOnly :exec
+UPDATE issue SET position = $2 WHERE id = $1
+`
+
+type UpdateIssuePositionOnlyParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Position float64     `json:"position"`
+}
+
+func (q *Queries) UpdateIssuePositionOnly(ctx context.Context, arg UpdateIssuePositionOnlyParams) error {
+	_, err := q.db.Exec(ctx, updateIssuePositionOnly, arg.ID, arg.Position)
+	return err
+}
+
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,

@@ -388,8 +388,22 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
     const squads: Squad[] = qc.getQueryData(workspaceKeys.squads(wsId)) ?? [];
-    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-    const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
+    // The workspace list cache now has a sort tuple in its key, so we walk
+    // every mounted variant via the prefix and dedupe — all variants carry
+    // the same issue bodies, only their ordering differs.
+    const cachedIssues: Issue[] = [];
+    const seenIssueIds = new Set<string>();
+    for (const [, cache] of qc.getQueriesData<ListIssuesCache>({
+      queryKey: issueKeys.list(wsId),
+    })) {
+      if (!cache) continue;
+      for (const issue of flattenIssueBuckets(cache)) {
+        if (!seenIssueIds.has(issue.id)) {
+          seenIssueIds.add(issue.id);
+          cachedIssues.push(issue);
+        }
+      }
+    }
 
     // Read current user identity imperatively — this factory runs outside
     // React render so we can't useAuthStore() as a hook here. The Proxy in

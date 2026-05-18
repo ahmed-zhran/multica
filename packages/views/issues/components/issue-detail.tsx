@@ -55,12 +55,13 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { flattenIssueBuckets, issueDetailOptions, issueKeys, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import type { ListIssuesCache } from "@multica/core/types";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -620,7 +621,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+  // Aggregate every mounted issue-list variant for initialData / parent
+  // lookups. All variants share the same issue bodies (only sort order differs),
+  // so we read across the prefix instead of relying on a single sorted cache.
+  const qcForLookup = useQueryClient();
+  const allIssues = useMemo(() => {
+    const out: ReturnType<typeof flattenIssueBuckets> = [];
+    const seen = new Set<string>();
+    for (const [, cache] of qcForLookup.getQueriesData<ListIssuesCache>({
+      queryKey: issueKeys.list(wsId),
+    })) {
+      if (!cache) continue;
+      for (const issue of flattenIssueBuckets(cache)) {
+        if (!seen.has(issue.id)) {
+          seen.add(issue.id);
+          out.push(issue);
+        }
+      }
+    }
+    return out;
+  }, [qcForLookup, wsId]);
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({

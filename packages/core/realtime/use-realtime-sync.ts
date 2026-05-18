@@ -26,7 +26,14 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueRebalanced,
+  onIssueRebalancedFallback,
 } from "../issues/ws-updaters";
+import {
+  IssueRebalancedPayloadSchema,
+  EMPTY_ISSUE_REBALANCED_PAYLOAD,
+} from "../api/schemas";
+import { parseWithFallback } from "../api/schema";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import { notificationPreferenceOptions } from "../notification-preferences/queries";
@@ -284,7 +291,7 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue:rebalanced", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -353,6 +360,30 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
+    // Parse the rebalance payload through a zod schema so a malformed shape
+    // never crashes the WS pipeline — CLAUDE.md "API Response Compatibility"
+    // applies here too. On any zod failure parseWithFallback returns the empty
+    // payload (workspace_id === ""), and we fall back to a workspace-scoped
+    // prefix invalidate so the UI still self-heals.
+    const unsubIssueRebalanced = ws.on("issue:rebalanced", (p) => {
+      const parsed = parseWithFallback(
+        p,
+        IssueRebalancedPayloadSchema,
+        EMPTY_ISSUE_REBALANCED_PAYLOAD,
+        { endpoint: "ws:issue:rebalanced" },
+      );
+      const currentWsId = getCurrentWsId();
+      if (!currentWsId) return;
+      if (!parsed.workspace_id) {
+        // Schema accepted the envelope but the workspace_id is missing — best
+        // effort: invalidate the current workspace's caches.
+        onIssueRebalancedFallback(qc, currentWsId);
+        return;
+      }
+      if (parsed.workspace_id !== currentWsId) return;
+      onIssueRebalanced(qc, currentWsId, parsed.status, parsed.items);
     });
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
@@ -817,6 +848,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueRebalanced();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

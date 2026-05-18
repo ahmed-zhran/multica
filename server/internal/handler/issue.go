@@ -82,6 +82,71 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	}
 }
 
+// issueOrderByClause maps the public (sort_by, sort_direction) pair to the SQL
+// ORDER BY tail used by ListIssues / ListGroupedIssues. Unknown values silently
+// downgrade to the default ("created_at DESC") rather than 400, per the API
+// compatibility contract — older desktop clients must keep working when newer
+// servers introduce additional sort keys.
+//
+// Every clause ends with `id DESC` as the deterministic tie-breaker so
+// keyset / offset pagination cannot return duplicates or drop rows when two
+// issues share the primary sort value.
+//
+// Nullable columns (start_date, due_date, title) explicitly use NULLS LAST in
+// BOTH directions. The Postgres default puts NULLs first in DESC, which would
+// surface a stack of unspecified rows the moment a user flips direction —
+// surprising and never useful. The `priority_rank` CASE expression keeps the
+// urgent…none order intentional (urgent = 0), so ASC = high-priority first.
+//
+// `tablePrefix` is the alias used in the surrounding query — `""` for the flat
+// ListIssues query (column-only), `"i."` for ListGroupedIssues (table alias `i`).
+func issueOrderByClause(sortBy, sortDirection, tablePrefix string) string {
+	dir := "ASC"
+	rev := "DESC"
+	if strings.EqualFold(sortDirection, "desc") {
+		dir = "DESC"
+		rev = "ASC"
+	}
+	p := tablePrefix
+	switch sortBy {
+	case "position":
+		// Manual sort: `position ASC, created_at DESC, id DESC` is the legacy
+		// ordering older desktop clients still default to, so keep this branch
+		// byte-identical to pre-fractional behavior. The DESC branch is the
+		// theoretical reverse, used only when the UI explicitly requests it.
+		if dir == "ASC" {
+			return fmt.Sprintf("%sposition ASC, %screated_at DESC, %sid DESC", p, p, p)
+		}
+		return fmt.Sprintf("%sposition DESC, %screated_at ASC, %sid ASC", p, p, p)
+	case "updated_at":
+		return fmt.Sprintf("%supdated_at %s, %sid DESC", p, dir, p)
+	case "priority":
+		// CASE expression inlined per plan — five-element enum, no materialized
+		// rank column needed. Lower number = higher priority, so ASC = urgent
+		// first. We reuse `rev` for the tie-breaker tail when direction is DESC,
+		// keeping "issues with the same priority order newest first" intuitive
+		// in either direction.
+		_ = rev // reserved for future symmetric ordering
+		return fmt.Sprintf(
+			"(CASE %spriority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END) %s, %screated_at DESC, %sid DESC",
+			p, dir, p, p,
+		)
+	case "due_date":
+		return fmt.Sprintf("%sdue_date %s NULLS LAST, %screated_at DESC, %sid DESC", p, dir, p, p)
+	case "start_date":
+		return fmt.Sprintf("%sstart_date %s NULLS LAST, %screated_at DESC, %sid DESC", p, dir, p, p)
+	case "title":
+		return fmt.Sprintf("%stitle %s NULLS LAST, %sid DESC", p, dir, p)
+	case "created_at":
+		fallthrough
+	default:
+		// Unknown sort_by silently downgrades to the documented default.
+		// `ListIssues` returning HTTP 400 here would white-screen older desktop
+		// builds that hard-coded a sort key the server later renamed.
+		return fmt.Sprintf("%screated_at %s, %sid DESC", p, dir, p)
+	}
+}
+
 // issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
@@ -739,18 +804,72 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
-	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
-	})
+	sortBy := r.URL.Query().Get("sort_by")
+	sortDirection := r.URL.Query().Get("sort_direction")
+	orderBy := issueOrderByClause(sortBy, sortDirection, "")
+
+	// Dynamic SQL: ORDER BY varies per sort_by/sort_direction combination, and
+	// sqlc cannot template ORDER BY at runtime. The filter clauses mirror the
+	// sqlc `ListIssues` definition (server/pkg/db/queries/issue.sql).
+	where := []string{"workspace_id = $1"}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if statusFilter.Valid {
+		where = append(where, fmt.Sprintf("status = %s", addArg(statusFilter.String)))
+	}
+	if priorityFilter.Valid {
+		where = append(where, fmt.Sprintf("priority = %s", addArg(priorityFilter.String)))
+	}
+	if assigneeFilter.Valid {
+		where = append(where, fmt.Sprintf("assignee_id = %s::uuid", addArg(assigneeFilter)))
+	}
+	if len(assigneeIdsFilter) > 0 {
+		where = append(where, fmt.Sprintf("assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	if creatorFilter.Valid {
+		where = append(where, fmt.Sprintf("creator_id = %s::uuid", addArg(creatorFilter)))
+	}
+	if projectFilter.Valid {
+		where = append(where, fmt.Sprintf("project_id = %s::uuid", addArg(projectFilter)))
+	}
+
+	limitArg := addArg(int64(limit))
+	offsetArg := addArg(int64(offset))
+	listQuery := fmt.Sprintf(
+		`SELECT id, workspace_id, title, description, status, priority,
+		        assignee_type, assignee_id, creator_type, creator_id,
+		        parent_issue_id, position, start_date, due_date, created_at, updated_at, number, project_id
+		 FROM issue WHERE %s ORDER BY %s LIMIT %s OFFSET %s`,
+		strings.Join(where, " AND "), orderBy, limitArg, offsetArg,
+	)
+
+	rows, err := h.DB.Query(ctx, listQuery, args...)
 	if err != nil {
+		slog.Warn("ListIssues query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list issues")
+		return
+	}
+	defer rows.Close()
+	issues := []db.ListIssuesRow{}
+	for rows.Next() {
+		var row db.ListIssuesRow
+		if err := rows.Scan(
+			&row.ID, &row.WorkspaceID, &row.Title, &row.Description,
+			&row.Status, &row.Priority, &row.AssigneeType, &row.AssigneeID,
+			&row.CreatorType, &row.CreatorID, &row.ParentIssueID, &row.Position,
+			&row.StartDate, &row.DueDate, &row.CreatedAt, &row.UpdatedAt,
+			&row.Number, &row.ProjectID,
+		); err != nil {
+			slog.Warn("ListIssues scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list issues")
+			return
+		}
+		issues = append(issues, row)
+	}
+	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
 		return
 	}
@@ -1047,6 +1166,9 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
+	groupSortBy := r.URL.Query().Get("sort_by")
+	groupSortDirection := r.URL.Query().Get("sort_direction")
+	innerOrderBy := issueOrderByClause(groupSortBy, groupSortDirection, "i.")
 	query := fmt.Sprintf(`
 WITH ranked AS (
 	SELECT
@@ -1057,7 +1179,7 @@ WITH ranked AS (
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
-			ORDER BY i.position ASC, i.created_at DESC
+			ORDER BY %s
 		) AS rn
 	FROM issue i
 	WHERE %s
@@ -1078,7 +1200,7 @@ ORDER BY
 	END,
 	assignee_type NULLS LAST,
 	assignee_id NULLS LAST,
-	rn`, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
+	rn`, innerOrderBy, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
 
 	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
@@ -1681,6 +1803,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Allocate position = MIN(position) - 1.0 within the same (workspace,
+	// status) bucket. The serializing `UPDATE workspace` in
+	// IncrementIssueCounter above already row-locked this workspace, so
+	// concurrent creates pick up our value without an extra advisory lock.
+	minPosition, err := qtx.GetMinIssuePosition(r.Context(), db.GetMinIssuePositionParams{
+		WorkspaceID: wsUUID,
+		Status:      status,
+	})
+	if err != nil {
+		slog.Warn("get min issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+	newPosition := minPosition - 1.0
+
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
@@ -1723,7 +1860,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -1743,7 +1880,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -2027,6 +2164,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
+	}
+
+	// After a successful position write, ask the rebalance service to inspect
+	// the (workspace, status) bucket and enqueue an async rebalance if the
+	// neighbour gap is approaching the float8 precision floor. The check is
+	// async (worker goroutine), so it never blocks the user's drag response.
+	if req.Position != nil {
+		h.PositionRebalanceService.MaybeEnqueueRebalance(r.Context(), issue.WorkspaceID, issue.Status)
 	}
 
 	if len(attachmentIDs) > 0 {

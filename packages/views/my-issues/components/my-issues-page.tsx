@@ -39,6 +39,9 @@ export function MyIssuesPage() {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
+  const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
+  const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   // Clear filter state when switching between workspaces (URL-driven).
@@ -83,9 +86,10 @@ export function MyIssuesPage() {
     wsId,
     scope,
     assigneeGroupFilter,
+    sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
+    ...myIssueListOptions(wsId, scope, filter, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({

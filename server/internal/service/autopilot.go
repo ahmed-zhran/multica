@@ -145,6 +145,18 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
 
+	// Allocate position = MIN(position) - 1.0 within the autopilot's
+	// destination bucket (always status="todo"). Serialized behind the
+	// workspace row lock taken by IncrementIssueCounter above.
+	minPosition, err := qtx.GetMinIssuePosition(ctx, db.GetMinIssuePositionParams{
+		WorkspaceID: ap.WorkspaceID,
+		Status:      "todo",
+	})
+	if err != nil {
+		return fmt.Errorf("get min issue position: %w", err)
+	}
+	newPosition := minPosition - 1.0
+
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   ap.WorkspaceID,
 		Title:         title,
@@ -159,7 +171,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorType:   "agent",
 		CreatorID:     ap.AssigneeID,
 		ParentIssueID: pgtype.UUID{},
-		Position:      0,
+		Position:      newPosition,
 		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,

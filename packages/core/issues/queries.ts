@@ -2,6 +2,8 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
+  IssueSortBy,
+  IssueSortDirection,
   IssueStatus,
   ListGroupedIssuesParams,
   ListIssuesParams,
@@ -9,18 +11,82 @@ import type {
 } from "../types";
 import { BOARD_STATUSES } from "./config";
 
+/**
+ * Sort tuple used to vary issue list cache identity by sort dimension.
+ *
+ * Why this exists: the workspace issue list is now server-sorted (the legacy
+ * client-side `sortIssues()` was removed in MUL-2314). Switching `sortBy` must
+ * trigger a new fetch — TanStack Query keys mutation off `queryKey` equality,
+ * so the sort tuple has to be part of the key for an active query, and stay
+ * OUT of the key when we want to address every sorted variant at once
+ * (invalidate-all, `setQueriesData` for optimistic patches that don't change
+ * ordering, etc.).
+ *
+ * The convention nailed down by the v4 plan:
+ *   - mounted queries (`issueListOptions`, `useLoadMoreByStatus` setQueryData)
+ *     ALWAYS pass the sort tuple — they target one specific variant.
+ *   - prefix operations (`invalidateQueries`, `setQueriesData`,
+ *     `getQueriesData`, `cancelQueries`) ALWAYS leave it off — TanStack's
+ *     default `exact: false` matches every variant under the prefix.
+ *   - exact reads after a key migration (e.g. delete-cache parent lookup,
+ *     mention suggestion) use `getQueriesData` with the prefix instead of
+ *     `getQueryData` exact, since they don't know which sort is mounted.
+ */
+export interface IssueListSort {
+  sortBy: IssueSortBy;
+  sortDirection: IssueSortDirection;
+}
+
+type IssueListPrefixKey = readonly ["issues", string, "list"];
+type IssueListExactKey = readonly ["issues", string, "list", IssueListSort];
+type IssueMyListPrefixKey = readonly ["issues", string, "my", string, MyIssuesFilter];
+type IssueMyListExactKey = readonly ["issues", string, "my", string, MyIssuesFilter, IssueListSort];
+
+function listKey(wsId: string, sort?: IssueListSort): IssueListPrefixKey | IssueListExactKey {
+  const prefix: IssueListPrefixKey = ["issues", wsId, "list"];
+  return sort ? [...prefix, sort] : prefix;
+}
+
+function myListKey(
+  wsId: string,
+  scope: string,
+  filter: MyIssuesFilter,
+  sort?: IssueListSort,
+): IssueMyListPrefixKey | IssueMyListExactKey {
+  const prefix: IssueMyListPrefixKey = ["issues", wsId, "my", scope, filter];
+  return sort ? [...prefix, sort] : prefix;
+}
+
+interface IssueListKey {
+  (wsId: string): IssueListPrefixKey;
+  (wsId: string, sort: IssueListSort): IssueListExactKey;
+}
+
+interface IssueMyListKey {
+  (wsId: string, scope: string, filter: MyIssuesFilter): IssueMyListPrefixKey;
+  (wsId: string, scope: string, filter: MyIssuesFilter, sort: IssueListSort): IssueMyListExactKey;
+}
+
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  /**
+   * Issue list key — pass `sort` for a specific variant (mounted query, load-more
+   * setQueryData), omit it for a prefix key (invalidate, setQueriesData,
+   * getQueriesData).
+   */
+  list: ((wsId: string, sort?: IssueListSort) =>
+    listKey(wsId, sort)) as IssueListKey,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
     [...issueKeys.assigneeGroupsAll(wsId), filter] as const,
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
-  /** Per-scope "my issues" list with filter identity baked into the key. */
-  myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
-    [...issueKeys.myAll(wsId), scope, filter] as const,
+  /**
+   * Per-scope "my issues" list — same sort tuple convention as `list`.
+   */
+  myList: ((wsId: string, scope: string, filter: MyIssuesFilter, sort?: IssueListSort) =>
+    myListKey(wsId, scope, filter, sort)) as IssueMyListKey,
   myAssigneeGroupsAll: (wsId: string) =>
     [...issueKeys.myAll(wsId), "assignee-groups"] as const,
   myAssigneeGroups: (
@@ -79,10 +145,21 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+async function fetchFirstPages(
+  filter: MyIssuesFilter = {},
+  sort?: IssueListSort,
+): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
+      api.listIssues({
+        status,
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...filter,
+        ...(sort
+          ? { sort_by: sort.sortBy, sort_direction: sort.sortDirection }
+          : {}),
+      }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
@@ -102,10 +179,10 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string) {
+export function issueListOptions(wsId: string, sort: IssueListSort) {
   return queryOptions({
-    queryKey: issueKeys.list(wsId),
-    queryFn: () => fetchFirstPages(),
+    queryKey: issueKeys.list(wsId, sort),
+    queryFn: () => fetchFirstPages({}, sort),
     select: flattenIssueBuckets,
   });
 }
@@ -113,15 +190,24 @@ export function issueListOptions(wsId: string) {
 export function issueAssigneeGroupsOptions(
   wsId: string,
   filter: AssigneeGroupedIssuesFilter,
+  sort: IssueListSort,
 ) {
+  // The sort tuple is part of the filter object that feeds into the queryKey —
+  // adding it directly into the filter (rather than as a sibling key segment)
+  // keeps `issueKeys.assigneeGroups` identity-stable for invalidation and lets
+  // `useLoadMoreByAssigneeGroup` reuse the same key without a separate sort
+  // overload.
+  const filterWithSort = { ...filter, ...sort };
   return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.assigneeGroups(wsId, filter),
+    queryKey: issueKeys.assigneeGroups(wsId, filterWithSort),
     queryFn: () =>
       api.listGroupedIssues({
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
         ...filter,
+        sort_by: sort.sortBy,
+        sort_direction: sort.sortDirection,
       }),
   });
 }
@@ -134,10 +220,11 @@ export function myIssueListOptions(
   wsId: string,
   scope: string,
   filter: MyIssuesFilter,
+  sort: IssueListSort,
 ) {
   return queryOptions({
-    queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: () => fetchFirstPages(filter),
+    queryKey: issueKeys.myList(wsId, scope, filter, sort),
+    queryFn: () => fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
   });
 }
@@ -146,15 +233,19 @@ export function myIssueAssigneeGroupsOptions(
   wsId: string,
   scope: string,
   filter: AssigneeGroupedIssuesFilter,
+  sort: IssueListSort,
 ) {
+  const filterWithSort = { ...filter, ...sort };
   return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.myAssigneeGroups(wsId, scope, filter),
+    queryKey: issueKeys.myAssigneeGroups(wsId, scope, filterWithSort),
     queryFn: () =>
       api.listGroupedIssues({
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
         ...filter,
+        sort_by: sort.sortBy,
+        sort_direction: sort.sortDirection,
       }),
   });
 }

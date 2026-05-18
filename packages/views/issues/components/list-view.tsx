@@ -11,7 +11,6 @@ import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
-import { sortIssues } from "../utils/sort";
 import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
@@ -36,8 +35,6 @@ export function ListView({
   /** When set, the per-section "+" pre-fills the project on the create form. */
   projectId?: string;
 }) {
-  const sortBy = useViewStore((s) => s.sortBy);
-  const sortDirection = useViewStore((s) => s.sortDirection);
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
   );
@@ -45,14 +42,15 @@ export function ListView({
     (s) => s.toggleListCollapsed
   );
 
+  // Server is the single source of truth for ordering — we just bucket by
+  // status and preserve the server-returned order within each bucket.
   const issuesByStatus = useMemo(() => {
     const map = new Map<IssueStatus, Issue[]>();
     for (const status of visibleStatuses) {
-      const filtered = issues.filter((i) => i.status === status);
-      map.set(status, sortIssues(filtered, sortBy, sortDirection));
+      map.set(status, issues.filter((i) => i.status === status));
     }
     return map;
-  }, [issues, visibleStatuses, sortBy, sortDirection]);
+  }, [issues, visibleStatuses]);
 
   const expandedStatuses = useMemo(
     () =>
@@ -114,9 +112,12 @@ function StatusAccordionItem({
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
+    { sort, myIssues: myIssuesOpts },
   );
 
   const issueIds = issues.map((i) => i.id);

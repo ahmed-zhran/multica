@@ -1,7 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  flattenIssueBuckets,
+  issueDetailOptions,
+  issueKeys,
+} from "@multica/core/issues/queries";
+import type { Issue, ListIssuesCache } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { StatusIcon } from "./status-icon";
 
@@ -32,8 +37,18 @@ const BASE_CLASS =
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();
-  const { data: issues = [] } = useQuery(issueListOptions(wsId));
-  const listIssue = issues.find((i) => i.id === issueId);
+  const qc = useQueryClient();
+  // Read any mounted issue-list variant (all share the same underlying issue
+  // bodies; only their sort order differs). Falling back to detail fetch when
+  // the issue isn't in any first-page cache.
+  let listIssue: Issue | undefined;
+  for (const [, cache] of qc.getQueriesData<ListIssuesCache>({
+    queryKey: issueKeys.list(wsId),
+  })) {
+    if (!cache) continue;
+    listIssue = flattenIssueBuckets(cache).find((i) => i.id === issueId);
+    if (listIssue) break;
+  }
 
   // Fallback fetch for issues outside the first page of the list (e.g. Done).
   const { data: detailIssue } = useQuery({

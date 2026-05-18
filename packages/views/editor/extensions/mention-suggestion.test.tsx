@@ -81,8 +81,22 @@ function fakeQc(data: {
     JSON.stringify(issueKeys.list("ws-1")),
     { byStatus } satisfies ListIssuesCache,
   );
+  // Both reads honoured: `getQueryData` for exact-key consumers (members /
+  // agents / squads still use exact keys), and `getQueriesData` for prefix
+  // consumers (the issue list cache key now carries a sort tuple — see
+  // mention-suggestion.tsx for why we walk the prefix).
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
+    getQueriesData: ({ queryKey }: { queryKey: readonly unknown[] }) => {
+      const prefix = JSON.stringify(queryKey);
+      const out: [readonly unknown[], unknown][] = [];
+      for (const [key, value] of map.entries()) {
+        if (key === prefix || key.startsWith(prefix.slice(0, -1) + ",")) {
+          out.push([JSON.parse(key), value]);
+        }
+      }
+      return out;
+    },
   } as unknown as QueryClient;
 }
 

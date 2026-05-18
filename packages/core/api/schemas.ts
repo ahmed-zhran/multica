@@ -6,6 +6,7 @@ import type {
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  IssueRebalancedPayload,
   ListIssuesResponse,
   TimelineEntry,
 } from "../types";
@@ -164,6 +165,29 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+// `issue:rebalanced` WebSocket event payload. Schema is intentionally lenient
+// for the same reasons as IssueSchema above: an older desktop must keep
+// parsing newer payload variants without crashing. `items` defaults to `[]`
+// so a malformed `items` value (missing, wrong shape) still produces a usable
+// outer payload, and the handler treats an empty array as a "rebalance done,
+// no per-issue detail" signal that maps to a prefix invalidate anyway.
+const IssueRebalanceItemSchema = z.object({
+  id: z.string(),
+  position: z.number(),
+}).loose();
+
+export const IssueRebalancedPayloadSchema = z.object({
+  workspace_id: z.string(),
+  status: z.string(),
+  items: z.array(IssueRebalanceItemSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_REBALANCED_PAYLOAD: IssueRebalancedPayload = {
+  workspace_id: "",
+  status: "",
+  items: [],
 };
 
 const IssueAssigneeGroupSchema = z.object({

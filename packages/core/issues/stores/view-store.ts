@@ -11,7 +11,14 @@ import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list";
 export type IssueGrouping = "status" | "assignee";
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
+export type SortField =
+  | "position"
+  | "priority"
+  | "start_date"
+  | "due_date"
+  | "created_at"
+  | "updated_at"
+  | "title";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
@@ -36,6 +43,7 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
+  { value: "updated_at", label: "Updated" },
   { value: "title", label: "Title" },
 ];
 
@@ -100,8 +108,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
-  sortBy: "position",
-  sortDirection: "asc",
+  sortBy: "created_at",
+  sortDirection: "desc",
   cardProperties: {
     priority: true,
     description: true,

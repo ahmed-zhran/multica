@@ -96,8 +96,9 @@ type Handler struct {
 	Hub                   *realtime.Hub
 	DaemonHub             *daemonws.Hub
 	Bus                   *events.Bus
-	TaskService           *service.TaskService
-	AutopilotService      *service.AutopilotService
+	TaskService              *service.TaskService
+	AutopilotService         *service.AutopilotService
+	PositionRebalanceService *service.PositionRebalanceService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
@@ -140,7 +141,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:             daemonHub,
 		Bus:                   bus,
 		TaskService:           taskSvc,
-		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		AutopilotService:         service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		PositionRebalanceService: service.NewPositionRebalanceService(queries, txStarter, bus),
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),
@@ -154,6 +156,15 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		cfg:                   cfg,
+	}
+}
+
+// StartBackgroundWorkers starts goroutines owned by services the handler
+// constructs internally. Main.go wires this with the sweep / autopilot
+// cancel context so they all exit together at shutdown.
+func (h *Handler) StartBackgroundWorkers(ctx context.Context) {
+	if h.PositionRebalanceService != nil {
+		h.PositionRebalanceService.Start(ctx)
 	}
 }
 

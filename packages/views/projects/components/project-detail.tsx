@@ -224,6 +224,9 @@ function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const sort = useMemo(() => ({ sortBy, sortDirection }), [sortBy, sortDirection]);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
@@ -241,9 +244,10 @@ function ProjectIssuesSurface({
     wsId,
     scope,
     assigneeGroupFilter,
+    sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
+    ...myIssueListOptions(wsId, scope, filter, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({

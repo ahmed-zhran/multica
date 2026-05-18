@@ -64,6 +64,7 @@
     "sort_start_date": "Start date",
     "sort_due_date": "Due date",
     "sort_created": "Created date",
+    "sort_updated": "Updated",
     "sort_title": "Title",
     "card_priority": "Priority",
     "card_description": "Description",
@@ -114,6 +115,9 @@
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues"
+  },
+  "toast": {
+    "drag_requires_manual": "Switch sort to Manual to drag and reorder issues."
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
