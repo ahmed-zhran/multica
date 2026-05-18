@@ -261,13 +261,15 @@ func TestListIssues_InvolvesUserID_MatchesDirectMemberAssignee(t *testing.T) {
 	}
 }
 
+// Pins workspace scoping on the UNION's agent branch (issue.sql:18). The
+// issue itself sits in testWorkspaceID so the outer `i.workspace_id = $1`
+// can't mask a missing `a.workspace_id = $1`; assignee_id is polymorphic and
+// has no FK (server/migrations/001_init.up.sql:61), so DB-level it's fine to
+// point at a foreign-workspace agent.
 func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceAgent(t *testing.T) {
 	ctx := context.Background()
 	fix := setupInvolvesFixture(t)
 
-	// Seed an agent owned by the same user in a *different* workspace, with
-	// an issue assigned to it. The current-workspace involves lookup must
-	// not see that issue.
 	var otherRuntimeID, otherAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
@@ -287,21 +289,22 @@ func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceAgent(t *testing.T) {
 		t.Fatalf("create other-ws agent: %v", err)
 	}
 
-	otherIssueID := insertIssueTo(t, ctx, fix.otherWsID, "other-ws agent issue", "agent", otherAgentID)
+	leakID := insertIssueTo(t, ctx, testWorkspaceID, "current-ws issue, foreign agent assignee", "agent", otherAgentID)
 	for _, issue := range listIssuesInvolves(t, fix.userID) {
-		if issue.ID == otherIssueID {
-			t.Fatalf("involves match leaked across workspaces for agent assignee")
+		if issue.ID == leakID {
+			t.Fatalf("involves match leaked: agent UNION branch did not enforce workspace scoping")
 		}
 	}
 }
 
+// Pins workspace scoping on the UNION's canonical-leader branch
+// (issue.sql:36-37). Current-workspace issue points at a foreign squad whose
+// leader is a foreign-workspace agent owned by the involves user; only
+// `s.workspace_id = $1` / `a.workspace_id = $1` can drop it.
 func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceLeader(t *testing.T) {
 	ctx := context.Background()
 	fix := setupInvolvesFixture(t)
 
-	// Same user's agent leading a squad in another workspace must not bleed
-	// into the current workspace's involves lookup. This is the workspace-
-	// scope variant for the canonical-leader branch.
 	var otherRuntimeID, otherAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
@@ -322,21 +325,22 @@ func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceLeader(t *testing.T) {
 	}
 
 	otherSquadID := insertSquad(t, ctx, fix.otherWsID, "Other WS Squad", otherAgentID)
-	otherIssueID := insertIssueTo(t, ctx, fix.otherWsID, "other-ws squad issue", "squad", otherSquadID)
+	leakID := insertIssueTo(t, ctx, testWorkspaceID, "current-ws issue, foreign squad assignee (leader)", "squad", otherSquadID)
 
 	for _, issue := range listIssuesInvolves(t, fix.userID) {
-		if issue.ID == otherIssueID {
-			t.Fatalf("involves match leaked across workspaces for canonical leader branch")
+		if issue.ID == leakID {
+			t.Fatalf("involves match leaked: canonical-leader UNION branch did not enforce workspace scoping")
 		}
 	}
 }
 
+// Pins workspace scoping on the UNION's squad_member.member branch
+// (issue.sql:26). Current-workspace issue points at a foreign squad whose
+// human member is the involves user; only `s.workspace_id = $1` can drop it.
 func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceSquadMember(t *testing.T) {
 	ctx := context.Background()
 	fix := setupInvolvesFixture(t)
 
-	// Need a leader agent for the foreign-workspace squad — squad.leader_id
-	// is FK to agent and CHECK-constrained to the squad's workspace.
 	var otherRuntimeID, otherLeaderID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
@@ -358,11 +362,64 @@ func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceSquadMember(t *testing.
 
 	otherSquadID := insertSquad(t, ctx, fix.otherWsID, "Other WS Squad Member", otherLeaderID)
 	insertSquadMember(t, ctx, otherSquadID, "member", fix.userID)
-	otherIssueID := insertIssueTo(t, ctx, fix.otherWsID, "other-ws squad-member issue", "squad", otherSquadID)
+	leakID := insertIssueTo(t, ctx, testWorkspaceID, "current-ws issue, foreign squad assignee (member)", "squad", otherSquadID)
 
 	for _, issue := range listIssuesInvolves(t, fix.userID) {
-		if issue.ID == otherIssueID {
-			t.Fatalf("involves match leaked across workspaces for squad_member branch")
+		if issue.ID == leakID {
+			t.Fatalf("involves match leaked: squad_member.member UNION branch did not enforce workspace scoping")
+		}
+	}
+}
+
+// Pins workspace scoping on the UNION's squad_member.agent branch
+// (issue.sql:45-47). Current-workspace issue points at a foreign squad whose
+// agent member is a foreign-workspace agent owned by the involves user; only
+// `s.workspace_id = $1` / `a.workspace_id = $1` can drop it.
+func TestListIssues_InvolvesUserID_ExcludesOtherWorkspaceSquadAgentMember(t *testing.T) {
+	ctx := context.Background()
+	fix := setupInvolvesFixture(t)
+
+	var otherRuntimeID, otherLeaderID, otherAgentMemberID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, NULL, 'Other Runtime AgentMember', 'cloud', 'other4', 'online', '', '{}'::jsonb, now())
+		RETURNING id
+	`, fix.otherWsID).Scan(&otherRuntimeID); err != nil {
+		t.Fatalf("create other runtime: %v", err)
+	}
+	// Foreign-workspace leader so the squad satisfies its leader_id workspace
+	// CHECK; owned by testUserID so it can't itself match the involves filter.
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Other WS Leader (agent-member test)', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id
+	`, fix.otherWsID, otherRuntimeID, testUserID).Scan(&otherLeaderID); err != nil {
+		t.Fatalf("create other leader agent: %v", err)
+	}
+	// Foreign-workspace agent owned by the involves user — the row whose
+	// owner_id alone would mistakenly match if `a.workspace_id = $1` were
+	// dropped from the agent-member subquery.
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Other WS Agent (foreign squad member)', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id
+	`, fix.otherWsID, otherRuntimeID, fix.userID).Scan(&otherAgentMemberID); err != nil {
+		t.Fatalf("create other agent member: %v", err)
+	}
+
+	otherSquadID := insertSquad(t, ctx, fix.otherWsID, "Other WS Squad AgentMember", otherLeaderID)
+	insertSquadMember(t, ctx, otherSquadID, "agent", otherAgentMemberID)
+	leakID := insertIssueTo(t, ctx, testWorkspaceID, "current-ws issue, foreign squad assignee (agent member)", "squad", otherSquadID)
+
+	for _, issue := range listIssuesInvolves(t, fix.userID) {
+		if issue.ID == leakID {
+			t.Fatalf("involves match leaked: squad_member.agent UNION branch did not enforce workspace scoping")
 		}
 	}
 }
