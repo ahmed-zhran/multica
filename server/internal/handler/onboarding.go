@@ -348,8 +348,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 
 	var assistant db.Agent
 	assistantCreated := false
+	// Only reuse helpers this flow could have created: name match AND
+	// workspace-visible. Skipping private agents is the access-control
+	// gate — a private "Multica Helper" owned by another member must not
+	// be auto-assigned to the bootstrap issue, which would bypass
+	// canAccessPrivateAgent and trigger a task as that private agent.
 	for _, existing := range agents {
-		if existing.Name == onboardingAssistantName {
+		if existing.Name == onboardingAssistantName && existing.Visibility == "workspace" {
 			assistant = existing
 			break
 		}
