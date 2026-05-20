@@ -8,12 +8,10 @@ import {
 } from "react";
 import { Camera, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
-  RuntimeModel,
 } from "@multica/core/types";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
@@ -21,7 +19,6 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -46,7 +43,7 @@ import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
-import { ThinkingPicker } from "./inspector/thinking-picker";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
 interface InspectorProps {
@@ -231,59 +228,6 @@ function Section({
       </div>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Thinking row — hidden entirely when the active model has no
-// `supported_levels` advertised. Reuses the shared runtime-models query so
-// it hits the same 60s cache as the model picker; no extra round-trip on
-// the inspector's hot path.
-// ---------------------------------------------------------------------------
-
-function ThinkingPropRow({
-  runtimeId,
-  runtimeOnline,
-  model,
-  value,
-  canEdit,
-  onChange,
-}: {
-  runtimeId: string | null;
-  runtimeOnline: boolean;
-  model: string;
-  value: string;
-  canEdit: boolean;
-  onChange: (next: string) => Promise<void> | void;
-}) {
-  const { t } = useT("agents");
-  const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
-  );
-
-  const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model);
-  const levels = entry?.thinking?.supported_levels ?? [];
-  if (levels.length === 0) return null;
-
-  return (
-    <PropRow label={t(($) => $.inspector.prop_thinking)} interactive={false}>
-      <ThinkingPicker
-        value={value}
-        levels={levels}
-        defaultLevel={entry?.thinking?.default_level}
-        canEdit={canEdit}
-        onChange={onChange}
-      />
-    </PropRow>
-  );
-}
-
-function pickModelEntry(
-  models: RuntimeModel[],
-  model: string,
-): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
-  return models.find((m) => m.default) ?? models[0];
 }
 
 // ---------------------------------------------------------------------------
