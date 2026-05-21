@@ -287,18 +287,16 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.5",
         date: "2026-05-21",
-        title: "Cloud Runtimes, Local-Time Reports & Smarter Issue State",
+        title: "Local-Time Usage & Smarter Issue State",
         changes: [],
         features: [
-          "Cloud runtimes can be launched from the runtime page when enabled, with recent node status visible in the same place",
-          "Reports now use each user's saved viewing timezone, so dashboard and runtime usage match the day boundaries people expect",
+          "Usage now uses each user's saved viewing timezone, so workspace and runtime usage match the day boundaries people expect",
           "Issues can carry compact agent-facing state that keeps automation progress tied to the work item without cluttering the sidebar",
           "Long Issue discussion threads can be read from the newest replies first while keeping the original thread context",
           "Project lists now offer compact and comfortable layouts that work better on small screens",
         ],
         improvements: [
           "Workspace commands in the CLI accept slugs and short IDs from the list view",
-          "Creating a cloud runtime now uses a shorter form, and Multica handles setup credentials for you",
           "The agent model picker no longer marks one model as a competing default",
           "Self-hosting and agent docs have corrected links and cleaner setup copy",
           "Reserved workspace paths have stronger coverage so special URLs are not accidentally reused as workspace addresses",
@@ -310,7 +308,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Live updates now skip broken messages safely and keep logs small when a bad message is unusually large",
           "The Create Issue button explains when a missing title is blocking creation",
           "Runtimes can recover a task whose claim response was lost before the task actually started",
-          "The usage reporting upgrade now stops before publishing empty charts when historical data is not ready",
         ],
       },
       {
