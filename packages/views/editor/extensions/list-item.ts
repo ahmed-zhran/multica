@@ -21,11 +21,13 @@ import { ListItem } from "@tiptap/extension-list";
 export const PatchedListItem = ListItem.extend({
   addKeyboardShortcuts() {
     return {
-      Enter: () =>
-        this.editor.commands.first(({ commands }) => [
+      Enter: () => {
+        if (this.editor.isActive("codeBlock")) return false;
+        return this.editor.commands.first(({ commands }) => [
           () => commands.splitListItem(this.name),
           () => commands.liftListItem(this.name),
-        ]),
+        ]);
+      },
       Tab: () => this.editor.commands.sinkListItem(this.name),
       "Shift-Tab": () => this.editor.commands.liftListItem(this.name),
     };
