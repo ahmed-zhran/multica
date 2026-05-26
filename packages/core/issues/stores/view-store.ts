@@ -145,7 +145,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   listCollapsedStatuses: [],
   ganttZoom: "week",
   ganttShowCompleted: false,
-  swimlaneGrouping: "parent",
+  swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
 
