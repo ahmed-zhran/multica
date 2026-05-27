@@ -1,0 +1,48 @@
+name: Mobile Verify
+
+# Runs lint + typecheck for apps/mobile only, parallel to the main CI
+# workflow. Path-filtered so PRs that don't touch mobile (or the type
+# surface mobile imports from @multica/core/types) pay zero cost.
+#
+# Mobile has no vitest suite today; if one lands, add `test` to the turbo
+# task list below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/core/types/**"
+      - ".github/workflows/mobile-verify.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/core/types/**"
+      - ".github/workflows/mobile-verify.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Type check and lint
+        run: pnpm exec turbo typecheck lint --filter=@multica/mobile
