@@ -102,6 +102,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
+	case "antigravity":
+		// Antigravity CLI (`agy`) does not expose a `--model` flag today;
+		// model selection lives in the user's Antigravity settings and is
+		// communicated to the backend internally by the CLI itself. Return
+		// an empty catalog so the daemon's model_list endpoint succeeds
+		// without populating a misleading dropdown.
+		return []Model{}, nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
