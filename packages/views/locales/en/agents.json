@@ -52,15 +52,12 @@
   },
   "runtime_filter": {
     "all": "All runtimes",
-    "all_description": "Agents on any machine",
     "section_local": "Local",
     "section_remote": "Remote",
     "section_cloud": "Cloud",
     "agent_count_one": "{{count}} agent",
     "agent_count_other": "{{count}} agents",
-    "this_machine": "This machine",
-    "empty": "No machines yet",
-    "reset": "All runtimes"
+    "empty": "No machines yet"
   },
   "columns": {
     "agent": "Agent",

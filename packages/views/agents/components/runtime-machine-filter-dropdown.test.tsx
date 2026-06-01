@@ -41,6 +41,7 @@ function renderDropdown(
   value: string | null,
   onChange: (id: string | null) => void,
   agentCountByMachine: Map<string, number>,
+  totalAgentCount?: number,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -53,6 +54,18 @@ function renderDropdown(
           value={value}
           onChange={onChange}
           agentCountByMachine={agentCountByMachine}
+          // Default to the sum of per-machine counts so existing tests
+          // keep their original assertion semantics; new tests can
+          // override to verify the "All runtimes" badge matches an
+          // external in-scope total even when agents are missing from
+          // the machine map.
+          totalAgentCount={
+            totalAgentCount ??
+            Array.from(agentCountByMachine.values()).reduce(
+              (sum, n) => sum + n,
+              0,
+            )
+          }
         />
       </QueryClientProvider>
     </I18nProvider>,
@@ -209,5 +222,21 @@ describe("RuntimeMachineFilterDropdown", () => {
     fireEvent.click(screen.getByTestId("agents-runtime-filter"));
 
     expect(screen.getByText("No machines yet")).toBeTruthy();
+  });
+
+  it("uses the explicit totalAgentCount for the All-runtimes badge even when it diverges from the per-machine sum", () => {
+    // Regression: the All-runtimes count used to be derived from
+    // agentCountByMachine, which silently dropped agents whose runtime
+    // was GC'd (not present in any current machine). The badge should
+    // track the in-scope total instead so it never undercounts what
+    // the user actually sees when the filter is cleared.
+    const machines = [makeMachine({ id: "m-local", title: "dev.local" })];
+    const counts = new Map([["m-local", 3]]);
+
+    renderDropdown(machines, null, vi.fn(), counts, /* totalAgentCount */ 5);
+
+    const trigger = screen.getByTestId("agents-runtime-filter");
+    // Trigger surfaces the All-runtimes total, not the per-machine sum.
+    expect(trigger.textContent).toContain("5");
   });
 });

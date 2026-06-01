@@ -52,15 +52,12 @@
   },
   "runtime_filter": {
     "all": "모든 런타임",
-    "all_description": "모든 기기의 에이전트",
     "section_local": "로컬",
     "section_remote": "원격",
     "section_cloud": "클라우드",
     "agent_count_one": "에이전트 {{count}}개",
     "agent_count_other": "에이전트 {{count}}개",
-    "this_machine": "이 기기",
-    "empty": "아직 기기가 없습니다",
-    "reset": "모든 런타임"
+    "empty": "아직 기기가 없습니다"
   },
   "columns": {
     "agent": "에이전트",

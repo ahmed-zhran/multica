@@ -52,14 +52,11 @@
   },
   "runtime_filter": {
     "all": "全部运行时",
-    "all_description": "所有机器上的智能体",
     "section_local": "本机",
     "section_remote": "远程",
     "section_cloud": "云端",
     "agent_count_other": "{{count}} 个智能体",
-    "this_machine": "本机",
-    "empty": "还没有机器",
-    "reset": "全部运行时"
+    "empty": "还没有机器"
   },
   "columns": {
     "agent": "智能体",

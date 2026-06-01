@@ -83,7 +83,36 @@ const SORT_LABEL_KEY: Record<SortKey, "label_recent" | "label_name" | "label_run
   created: "label_created",
 };
 
-export function AgentsPage() {
+export interface AgentsPageProps {
+  /**
+   * Desktop-only daemon id for the current host. Forwarded into
+   * `buildRuntimeMachines` so the local machine renders under the
+   * "Local" section (rather than "Remote") on the same host that owns
+   * the daemon. Web omits this — the SaaS shell doesn't bundle a
+   * daemon, so the local section never has a real candidate anyway.
+   */
+  localDaemonId?: string | null;
+  /**
+   * Desktop-only friendly device name for the local daemon. Paired
+   * with `localDaemonId` for the "Local" section title; web omits.
+   */
+  localMachineName?: string | null;
+  /**
+   * Desktop-only signal that this host always owns a local machine
+   * row, even when no server-side runtime is currently registered
+   * (daemon stopped, not yet started, or runtime GC'd). Mirrors
+   * `RuntimesPage.hasLocalMachine`. The filter dropdown uses the
+   * synthesized placeholder to keep "Local" available for selection
+   * in the empty window.
+   */
+  hasLocalMachine?: boolean;
+}
+
+export function AgentsPage({
+  localDaemonId = null,
+  localMachineName = null,
+  hasLocalMachine = false,
+}: AgentsPageProps = {}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -204,12 +233,24 @@ export function AgentsPage() {
   // groupings) the same way the Runtimes page does, so the filter
   // dropdown labels match the machines the user sees there. The
   // `now` clock only affects health rollups — we don't render health
-  // chips in this list, so a stale snapshot is fine; a single derive
-  // per render is cheap and avoids pulling in a 30s tick on a page
-  // that doesn't show health.
+  // chips in this list, so a snapshot from mount time is fine. We
+  // also forward `localDaemonId` / `localMachineName` /
+  // `hasLocalMachine` so the Local section (and the synthesized
+  // placeholder on Desktop) appears here the same way it does on the
+  // Runtimes page; `currentUserId` gates device-name consolidation
+  // so a remote member's identically-named host doesn't get claimed
+  // as the viewer's local machine.
+  const [machinesNow] = useState(() => Date.now());
   const machines = useMemo(
-    () => buildRuntimeMachines(runtimes, { now: Date.now() }),
-    [runtimes],
+    () =>
+      buildRuntimeMachines(runtimes, {
+        now: machinesNow,
+        localDaemonId,
+        localMachineName,
+        currentUserId: currentUser?.id ?? null,
+        ensureLocalMachine: hasLocalMachine,
+      }),
+    [runtimes, machinesNow, localDaemonId, localMachineName, currentUser?.id, hasLocalMachine],
   );
 
   // Reverse map: runtime_id → machine id. Lets the filter step look up
@@ -227,8 +268,13 @@ export function AgentsPage() {
   // Per-machine agent counts in `inScope` — used both for the chip
   // badges in the dropdown AND to make the runtime filter respect the
   // current scope (e.g. "Mine" only shows machines that have one of
-  // my agents). Computed against `inScope` (not `visibleInView`) so the
-  // number next to "All" is exactly `inScope.length`.
+  // my agents). Computed against `inScope` (not `visibleInView`).
+  // Agents whose runtime doesn't map to a current machine
+  // (e.g. bound to a GC'd runtime) are intentionally skipped here
+  // — they still appear in the list when the filter is "All
+  // runtimes", just not bucketed under any per-machine chip. The
+  // "All runtimes" badge uses `inScope.length` directly so it stays
+  // consistent with the unfiltered list.
   const agentCountByMachine = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of inScope) {
@@ -711,6 +757,7 @@ function ActiveToolbarRow({
           value={runtimeMachineId}
           onChange={onRuntimeMachineChange}
           agentCountByMachine={agentCountByMachine}
+          totalAgentCount={totalCount}
         />
         {archivedCount > 0 && (
           <button

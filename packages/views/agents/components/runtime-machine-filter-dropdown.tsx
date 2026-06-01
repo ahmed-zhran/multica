@@ -28,25 +28,23 @@ export function RuntimeMachineFilterDropdown({
   value,
   onChange,
   agentCountByMachine,
+  // Sourced separately from the in-scope agent list (not derived from
+  // `agentCountByMachine`) so the "All runtimes" badge stays accurate
+  // even when an in-scope agent is bound to a runtime that's been GC'd
+  // and no longer shows up under any current machine.
+  totalAgentCount,
 }: {
   machines: RuntimeMachine[];
   value: string | null;
   onChange: (id: string | null) => void;
   agentCountByMachine: Map<string, number>;
+  totalAgentCount: number;
 }) {
   const { t } = useT("agents");
   const selected =
     value === null
       ? null
       : machines.find((machine) => machine.id === value) ?? null;
-  // Total count of agents in the current scope, regardless of which
-  // machine they're on. Used as the trailing count on the "All runtimes"
-  // entry so the user can see what they'd see if they cleared the filter.
-  const totalAgentCount = useMemo(() => {
-    let total = 0;
-    for (const count of agentCountByMachine.values()) total += count;
-    return total;
-  }, [agentCountByMachine]);
 
   const triggerLabel = selected ? selected.title : t(($) => $.runtime_filter.all);
   // Always show a count, even when the trigger is "All runtimes" — keeps
