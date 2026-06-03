@@ -5,10 +5,12 @@
 -- offset in non-UTC timezones (GH #3618 / MUL-2925). DATE carries no time or
 -- timezone, so the picked day is preserved as-is.
 --
--- Existing rows are truncated at the UTC day boundary (`::date` runs in the
--- migration session's UTC timezone), matching what the Gantt already showed
--- for them. The original local-day intent of legacy rows is unrecoverable
--- from a bare instant, so this is the best-effort conversion.
+-- Existing rows are truncated at the UTC day boundary, matching what the Gantt
+-- already showed for them. `AT TIME ZONE 'UTC'` pins the conversion to UTC
+-- explicitly so it does not depend on the migration session's TimeZone setting
+-- (a bare `::date` cast would be session-timezone dependent). The original
+-- local-day intent of legacy rows is unrecoverable from a bare instant, so this
+-- is the best-effort conversion.
 ALTER TABLE issue
-    ALTER COLUMN start_date TYPE DATE USING start_date::date,
-    ALTER COLUMN due_date TYPE DATE USING due_date::date;
+    ALTER COLUMN start_date TYPE DATE USING (start_date AT TIME ZONE 'UTC')::date,
+    ALTER COLUMN due_date TYPE DATE USING (due_date AT TIME ZONE 'UTC')::date;
