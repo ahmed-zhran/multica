@@ -4,6 +4,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
+# Set Multica paths relative to this repo — portable across machines
+export MULTICA_HOME="$REPO_ROOT"
+export MULTICA_WORKSPACES_ROOT="$REPO_ROOT/workspaces"
+export PATH="$REPO_ROOT/server/bin:$PATH"
+
 echo "================================================"
 echo "  Multica — Self-hosted Server Runner"
 echo "  Repo: $REPO_ROOT"
