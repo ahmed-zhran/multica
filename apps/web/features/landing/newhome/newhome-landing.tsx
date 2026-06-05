@@ -105,7 +105,7 @@ function NewHomeNav() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="inline-flex h-9 items-center rounded-[6px] px-3 text-[13.5px] font-medium text-[#0a0d12]/62 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12]"
+                className="inline-flex h-9 items-center rounded-[8px] px-3 text-[13.5px] font-medium text-[#0a0d12]/62 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12]"
               >
                 {link.label}
               </Link>
@@ -134,7 +134,7 @@ function GitHubStars() {
       target="_blank"
       rel="noreferrer"
       aria-label={`Star Multica on GitHub — ${GITHUB_STAR_COUNT} stars`}
-      className="hidden items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-[13px] font-semibold text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12] sm:inline-flex"
+      className="hidden items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[13px] font-semibold text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12] sm:inline-flex"
     >
       <GitHubIcon className="size-[18px] text-[#0a0d12]" />
       <span className="inline-flex items-center gap-1">
@@ -377,7 +377,7 @@ function DemoLiveHint() {
 
 function navButton(tone: "solid" | "ghost") {
   return cn(
-    "inline-flex h-9 items-center justify-center rounded-[6px] px-3.5 text-[13.5px] font-semibold transition-colors",
+    "inline-flex h-9 items-center justify-center rounded-[8px] px-3.5 text-[13.5px] font-semibold transition-colors",
     tone === "solid"
       ? "bg-[#0a0d12] text-white hover:bg-[#0a0d12]/90"
       : "border border-[#0a0d12]/14 bg-white text-[#0a0d12] hover:bg-[#0a0d12]/[0.04]",
@@ -386,7 +386,7 @@ function navButton(tone: "solid" | "ghost") {
 
 function heroButton(tone: "solid" | "ghost") {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-[6px] px-5 py-3 text-[14px] font-semibold transition-colors",
+    "inline-flex items-center justify-center gap-2 rounded-[8px] px-5 py-3 text-[14px] font-semibold transition-colors",
     tone === "solid"
       ? "bg-[#0a0d12] text-white hover:bg-[#0a0d12]/90"
       : "border border-[#0a0d12]/14 bg-white text-[#0a0d12] hover:bg-[#0a0d12]/[0.04]",

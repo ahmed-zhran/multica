@@ -175,7 +175,7 @@ function BrowserBar({
             type="button"
             onClick={() => onTab(id)}
             className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-[6px] px-2.5 text-[13px] font-medium transition-colors",
+              "inline-flex h-7 items-center gap-1.5 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors",
               tab === id
                 ? "bg-white text-[#0a0d12] shadow-[0_1px_2px_rgba(10,13,18,0.08)] ring-1 ring-[#0a0d12]/8"
                 : "text-[#0a0d12]/55 hover:bg-[#0a0d12]/[0.04] hover:text-[#0a0d12]/80",
