@@ -51,6 +51,11 @@ apps/web/test-results/
 .agent_context/
 .multica/
 
+# repo-local persistent data
+pgdata/
+uploads/
+workspaces/
+
 # local settings
 .claude/
 .tool-versions

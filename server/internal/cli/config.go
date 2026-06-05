@@ -10,6 +10,17 @@ import (
 
 const defaultCLIConfigPath = ".multica/config.json"
 
+// multicaHome returns the base directory for Multica config and state.
+// If MULTICA_HOME is set, uses that. Otherwise uses the user's home directory.
+// This allows running Multica fully from a project directory by setting
+// MULTICA_HOME to the project root.
+func multicaHome() (string, error) {
+	if v := os.Getenv("MULTICA_HOME"); v != "" {
+		return v, nil
+	}
+	return os.UserHomeDir()
+}
+
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
 	ServerURL   string `json:"server_url,omitempty"`
@@ -27,7 +38,7 @@ func CLIConfigPath() (string, error) {
 // An empty profile returns the default path (~/.multica/config.json).
 // A named profile returns ~/.multica/profiles/<name>/config.json.
 func CLIConfigPathForProfile(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := multicaHome()
 	if err != nil {
 		return "", fmt.Errorf("resolve CLI config path: %w", err)
 	}
@@ -40,7 +51,7 @@ func CLIConfigPathForProfile(profile string) (string, error) {
 // ProfileDir returns the base directory for a profile's state files (pid, log).
 // An empty profile returns ~/.multica/. A named profile returns ~/.multica/profiles/<name>/.
 func ProfileDir(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := multicaHome()
 	if err != nil {
 		return "", fmt.Errorf("resolve profile dir: %w", err)
 	}
