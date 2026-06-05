@@ -121,14 +121,23 @@ else
   echo ""
   echo "─── ⚠ One-time auth required ──────────────────────"
   echo "  The daemon needs to log in to your server once."
-  echo "  Run this command:"
+
+  # Try to grab the verification code from backend logs
+  VERIFY_CODE=$(docker compose -f docker-compose.selfhost.yml logs backend 2>/dev/null | \
+    grep -oP 'code is \K\d{6}' | tail -1 || true)
+  if [ -n "$VERIFY_CODE" ]; then
+    echo "  Your verification code: $VERIFY_CODE"
+  else
+    echo "  (Check backend logs for the verification code)"
+  fi
+
+  echo ""
+  echo "  Run this to log in:"
   echo ""
   echo "    $MULTICA_BIN login"
   echo ""
-  echo "  This opens a browser — enter your email and the"
-  echo "  verification code shown in the backend logs."
-  echo ""
-  echo "  After that, run ./run.sh again and the daemon"
+  echo "  It opens a browser — enter your email and the code"
+  echo "  above. After that, run ./run.sh again and the daemon"
   echo "  will start automatically."
   echo "────────────────────────────────────────────────────"
   echo ""
