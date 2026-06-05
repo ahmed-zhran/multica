@@ -504,24 +504,34 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+// multicaHome returns MULTICA_HOME value, or the user's home directory as fallback.
+// Mirrors the logic in internal/cli/config.go so the daemon also respects MULTICA_HOME.
+func multicaHome() string {
+	if h := os.Getenv("MULTICA_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
+
 // ResolveWorkspacesRoot returns the absolute path that the daemon and CLI
 // should treat as the workspaces root. Resolution order: explicit override >
-// MULTICA_WORKSPACES_ROOT env > default ($HOME/multica_workspaces, or
-// $HOME/multica_workspaces_<profile> for a named profile). Read-only callers
-// (e.g. `multica daemon disk-usage`) use this directly so they pick the same
-// directory the running daemon would have picked.
+// MULTICA_WORKSPACES_ROOT env > default ($MULTICA_HOME/workspaces, or
+// $HOME/multica_workspaces). Read-only callers (e.g. `multica daemon
+// disk-usage`) use this directly so they pick the same directory the running
+// daemon would have picked.
 func ResolveWorkspacesRoot(profile, override string) (string, error) {
 	root := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
 	if override != "" {
 		root = override
 	}
 	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
-		}
+		home := multicaHome()
 		if profile != "" {
 			root = filepath.Join(home, "multica_workspaces_"+profile)
+		} else if os.Getenv("MULTICA_HOME") != "" {
+			// When MULTICA_HOME is explicitly set, workspaces go under it
+			root = filepath.Join(home, "workspaces")
 		} else {
 			root = filepath.Join(home, "multica_workspaces")
 		}

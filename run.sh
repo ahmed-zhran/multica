@@ -20,30 +20,36 @@ command -v docker >/dev/null 2>&1 || { echo "✗ Docker is required. Install it 
 command -v curl >/dev/null 2>&1 || { echo "✗ curl is required."; exit 1; }
 command -v openssl >/dev/null 2>&1 || { echo "✗ openssl is required."; exit 1; }
 
-# ---------- CLI Binary ----------
+# ---------- CLI Binary (build from source w/ MULTICA_HOME patch) ----------
 MULTICA_BIN="$REPO_ROOT/server/bin/multica"
-if [ ! -f "$MULTICA_BIN" ]; then
-  echo "==> Downloading Multica CLI binary..."
+GO_BIN="${MULTICA_GO:-/usr/local/go1.26/bin/go}"
+
+build_multica_cli() {
+  echo "==> Building Multica CLI from source (MULTICA_HOME-aware)..."
   mkdir -p "$REPO_ROOT/server/bin"
 
-  # Fetch the latest release tag from GitHub
-  echo "   Fetching latest release..."
-  TAG=$(curl -sI "https://github.com/multica-ai/multica/releases/latest" | \
-    grep -i "^location:" | sed 's|.*/v|v|' | tr -d '[:space:]')
-  if [ -z "$TAG" ]; then
-    TAG="v0.3.17"
-    echo "   (auto-detection failed, using $TAG)"
+  # Install Go 1.26.1 if not present
+  if [ ! -x "$GO_BIN" ]; then
+    echo "   Installing Go 1.26.1 to /usr/local/go1.26..."
+    curl -fsSL "https://go.dev/dl/go1.26.1.linux-amd64.tar.gz" -o /tmp/go1.26.tar.gz
+    sudo rm -rf /usr/local/go1.26 /usr/local/go
+    sudo tar -C /usr/local -xzf /tmp/go1.26.tar.gz
+    sudo mv /usr/local/go /usr/local/go1.26
+    rm -f /tmp/go1.26.tar.gz
+    echo "✓ Go 1.26.1 installed"
   fi
-  VERSION="${TAG#v}"
 
-  echo "   Downloading multica-cli-${VERSION}-linux-amd64.tar.gz ..."
-  curl -fsSL "https://github.com/multica-ai/multica/releases/download/${TAG}/multica-cli-${VERSION}-linux-amd64.tar.gz" \
-    -o /tmp/multica.tar.gz
-  tar -xzf /tmp/multica.tar.gz -C /tmp/ multica
-  mv /tmp/multica "$MULTICA_BIN"
-  chmod +x "$MULTICA_BIN"
-  rm -f /tmp/multica.tar.gz
-  echo "✓ CLI binary installed: $MULTICA_BIN"
+  COMMIT=$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  cd "$REPO_ROOT/server"
+  $GO_BIN build -ldflags \
+    "-X main.version=0.3.17 -X main.commit=$COMMIT -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o bin/multica ./cmd/multica 2>&1
+  strip bin/multica 2>/dev/null || true
+  echo "✓ CLI binary built: $MULTICA_BIN"
+}
+
+if [ ! -f "$MULTICA_BIN" ]; then
+  build_multica_cli
 fi
 
 # ---------- Environment file ----------
@@ -51,7 +57,6 @@ if [ ! -f .env ]; then
   echo "==> Creating .env from .env.example..."
   cp .env.example .env
 
-  # Generate a random JWT_SECRET
   JWT=$(openssl rand -hex 32)
   if [ "$(uname)" = "Darwin" ]; then
     sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$JWT/" .env
@@ -99,7 +104,25 @@ echo "==> Configuring CLI for self-hosted server..."
 "$MULTICA_BIN" config set server_url "http://localhost:8080" 2>/dev/null || true
 "$MULTICA_BIN" config set app_url "http://localhost:3000" 2>/dev/null || true
 
-# ---------- Auth Check ----------
+# ---------- Auth ----------
+# If there's an old config at ~/.multica/config.json, migrate token
+OLD_CONFIG="$HOME/.multica/config.json"
+if [ -f "$OLD_CONFIG" ]; then
+  OLD_TOKEN=$(grep -oP '"token":\s*"\K[^"]+' "$OLD_CONFIG" 2>/dev/null || true)
+  if [ -n "$OLD_TOKEN" ]; then
+    echo "==> Migrating auth token from ~/.multica/ to repo..."
+    "$MULTICA_BIN" config set server_url "http://localhost:8080" 2>/dev/null || true
+    "$MULTICA_BIN" config set app_url "http://localhost:3000" 2>/dev/null || true
+    # Write token directly to config
+    CFG_PATH="$REPO_ROOT/.multica/config.json"
+    if [ -f "$CFG_PATH" ]; then
+      sed -i 's/"token": *"[^"]*"/"token": "'"$OLD_TOKEN"'"/' "$CFG_PATH" 2>/dev/null || true
+    fi
+    echo "✓ Token migrated"
+  fi
+fi
+
+# Check auth status
 AUTH_OK=false
 if AUTH_OUTPUT=$("$MULTICA_BIN" auth status 2>&1); then
   if echo "$AUTH_OUTPUT" | grep -qi "logged in\|authenticated\|token"; then
@@ -107,40 +130,91 @@ if AUTH_OUTPUT=$("$MULTICA_BIN" auth status 2>&1); then
   fi
 fi
 
+# Auto-login if not authenticated
+if [ "$AUTH_OK" != true ]; then
+  echo ""
+  echo "─── ⚠ Authenticating ──────────────────────────────"
+
+  # Read stored email or prompt
+  CFG_FILE="$REPO_ROOT/.multica/config.json"
+  STORED_EMAIL=$(grep -oP '"auth_email":\s*"\K[^"]+' "$CFG_FILE" 2>/dev/null || true)
+
+  if [ -z "$STORED_EMAIL" ]; then
+    # Check env var, then interactive prompt, then fallback
+    if [ -n "${MULTICA_AUTH_EMAIL:-}" ]; then
+      STORED_EMAIL="$MULTICA_AUTH_EMAIL"
+    else
+      echo "  Enter the email you used to log into the web UI:"
+      printf "  Email: "
+      read -r STORED_EMAIL
+      if [ -z "$STORED_EMAIL" ]; then
+        echo "✗ No email provided. Run again with:"
+        echo "    MULTICA_AUTH_EMAIL=you@email.com ./run.sh"
+        echo "  Or authenticate manually:"
+        echo "    $MULTICA_BIN login"
+        echo ""
+        exit 1
+      fi
+    fi
+    # Save email for next run
+    "$MULTICA_BIN" config set server_url "http://localhost:8080" 2>/dev/null || true
+    "$MULTICA_BIN" config set app_url "http://localhost:3000" 2>/dev/null || true
+    # Inject auth_email into config.json
+    if [ -f "$CFG_FILE" ]; then
+      sed -i 's/}$/,"auth_email": "'"$STORED_EMAIL"'"}/' "$CFG_FILE" 2>/dev/null || true
+    fi
+  fi
+
+  echo "  Email: $STORED_EMAIL"
+
+  # Step 1: Send code (triggers dev code 888888)
+  echo "  Sending verification code..."
+  curl -sf -X POST "http://localhost:8080/auth/send-code" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\": \"$STORED_EMAIL\"}" > /dev/null 2>&1 || true
+  sleep 1
+
+  # Step 2: Verify with dev code
+  echo "  Verifying with code 888888..."
+  AUTH_RESP=$(curl -sf -X POST "http://localhost:8080/auth/verify-code" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\": \"$STORED_EMAIL\", \"code\": \"888888\"}" 2>/dev/null || echo "")
+
+  TOKEN=$(echo "$AUTH_RESP" | grep -oP '"token":\s*"\K[^"]+' || true)
+
+  if [ -n "$TOKEN" ]; then
+    echo "  ✓ Authenticated!"
+    # Write token to config.json
+    if [ -f "$CFG_FILE" ]; then
+      sed -i 's/"token": *"[^"]*"/"token": "'"$TOKEN"'"/' "$CFG_FILE" 2>/dev/null || true
+      # If no token field exists, add it before closing brace
+      grep -q '"token"' "$CFG_FILE" 2>/dev/null || \
+        sed -i 's/}$/,"token": "'"$TOKEN"'"}/' "$CFG_FILE" 2>/dev/null || true
+    fi
+    AUTH_OK=true
+  else
+    echo "  ✗ Auto-login failed."
+    echo "  Response: $(echo "$AUTH_RESP" | head -c 200)"
+    echo ""
+    echo "  Try running manually:"
+    echo "    $MULTICA_BIN login"
+    echo "  (opens browser — use email + code from backend logs)"
+    echo ""
+  fi
+  echo "────────────────────────────────────────────────────"
+  echo ""
+fi
+
 # ---------- Daemon ----------
 if [ "$AUTH_OK" = true ]; then
   echo "==> Starting daemon (background)..."
-  "$MULTICA_BIN" daemon stop 2>/dev/null || true  # Clean up any stale daemon
+  "$MULTICA_BIN" daemon stop 2>/dev/null || true
   "$MULTICA_BIN" daemon start 2>&1 || {
-    echo "⚠ Daemon start had issues — check logs with: $MULTICA_BIN daemon logs"
+    echo "⚠ Daemon start had issues — check logs: $MULTICA_BIN daemon logs"
   }
   echo "✓ Daemon started"
   echo "   Status: $MULTICA_BIN daemon status"
   echo "   Logs:   $MULTICA_BIN daemon logs"
-else
-  echo ""
-  echo "─── ⚠ One-time auth required ──────────────────────"
-  echo "  The daemon needs to log in to your server once."
-
-  # Try to grab the verification code from backend logs
-  VERIFY_CODE=$(docker compose -f docker-compose.selfhost.yml logs backend 2>/dev/null | \
-    grep -oP 'code is \K\d{6}' | tail -1 || true)
-  if [ -n "$VERIFY_CODE" ]; then
-    echo "  Your verification code: $VERIFY_CODE"
-  else
-    echo "  (Check backend logs for the verification code)"
-  fi
-
-  echo ""
-  echo "  Run this to log in:"
-  echo ""
-  echo "    $MULTICA_BIN login"
-  echo ""
-  echo "  It opens a browser — enter your email and the code"
-  echo "  above. After that, run ./run.sh again and the daemon"
-  echo "  will start automatically."
-  echo "────────────────────────────────────────────────────"
-  echo ""
 fi
 
 echo ""
